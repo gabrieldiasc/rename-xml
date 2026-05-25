@@ -1,7 +1,7 @@
 import os
 import xml.etree.ElementTree as ET
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import ttk, filedialog, messagebox
 
 def formatar_valor(valor_str):
     try:
@@ -10,14 +10,7 @@ def formatar_valor(valor_str):
     except:
         return "0,00"
 
-def organizar_documentos_v8():
-    root = tk.Tk()
-    root.withdraw()
-    
-    diretorio = filedialog.askdirectory(title="Selecione a pasta com XMLs e PDFs")
-    if not diretorio:
-        return
-
+def processar_arquivos(diretorio, tipo_fluxo):
     sucessos = 0
     erros = 0
     status_cancelamento = ["101", "151", "155", "102"]
@@ -49,9 +42,14 @@ def organizar_documentos_v8():
 
                 # --- 2. EXTRAÇÃO DE DADOS ---
                 chave_node = root_xml.find('.//{*}chNFe') or root_xml.find('.//{*}chCTe')
-                emitente_node = root_xml.find('.//{*}emit/{*}xNome')
                 valor_node = root_xml.find(tag_val)
                 num_node = root_xml.find(tag_num)
+
+                # Busca o Emitente para Entrada e Destinatário para Saída
+                if tipo_fluxo == "Saída":
+                    parceiro_node = root_xml.find('.//{*}toma/{*}xNome') or root_xml.find('.//{*}dest/{*}xNome')
+                else:
+                    parceiro_node = root_xml.find('.//{*}emit/{*}xNome')
 
                 # --- 3. CANCELAMENTO ---
                 is_cancelada = False
@@ -75,23 +73,21 @@ def organizar_documentos_v8():
                 else:
                     numero = "000"
 
-                # --- 5. DADOS PARA DESEMPATE ---
-                emitente = emitente_node.text if emitente_node is not None else "Emitente_Desconhecido"
-                emitente_limpo = "".join([c for c in emitente if c.isalnum() or c == ' ']).strip()
+                # --- 5. NOMENCLATURA ---
+                parceiro = parceiro_node.text if parceiro_node is not None else "Desconhecido"
+                parceiro_limpo = "".join([c for c in parceiro if c.isalnum() or c == ' ']).strip()
                 valor_formatado = formatar_valor(valor_node.text) if valor_node is not None else "0,00"
 
-                # XML: Padrão curto inicialmente
+                # XML: Sempre Modelo + Número
                 novo_nome_xml = f"{prefixo} {numero}{status_texto}.xml"
                 
-                # PDF: Padrão sempre completo
-                novo_nome_pdf = f"{prefixo} {numero} {emitente_limpo} {valor_formatado}{status_texto}.pdf"
+                # PDF: Modelo + Número + Parceiro + Valor
+                novo_nome_pdf = f"{prefixo} {numero} {parceiro_limpo} {valor_formatado}{status_texto}.pdf"
 
-                # --- 6. TRAVA DE NÚMEROS IGUAIS (DESEMPATE PELO EMITENTE) ---
+                # --- 6. TRAVA DE DUPLICIDADE ---
                 caminho_final_xml = os.path.join(diretorio, novo_nome_xml)
-                
-                # Se o arquivo XML "curto" já existe, renomeamos este atual com o nome do emitente
                 if os.path.exists(caminho_final_xml):
-                    novo_nome_xml = f"{prefixo} {numero} {emitente_limpo}{status_texto}.xml"
+                    novo_nome_xml = f"{prefixo} {numero} {parceiro_limpo}{status_texto}.xml"
                     caminho_final_xml = os.path.join(diretorio, novo_nome_xml)
 
                 # --- 7. EXECUÇÃO ---
@@ -107,5 +103,51 @@ def organizar_documentos_v8():
 
     messagebox.showinfo("Concluído", f"Processo finalizado!\n\nSucessos: {sucessos}\nErros: {erros}")
 
-if __name__ == "__main__":
-    organizar_documentos_v8()
+# --- INTERFACE GRÁFICA (GUI) ---
+def selecionar_pasta():
+    caminho = filedialog.askdirectory(title="Selecione a pasta com os XMLs")
+    if caminho:
+        entrada_pasta.delete(0, tk.END)
+        entrada_pasta.insert(0, caminho)
+
+def iniciar_processamento():
+    diretorio = entrada_pasta.get()
+    tipo_fluxo = var_fluxo.get()  # Pega o valor do Radiobutton
+    
+    if not diretorio:
+        messagebox.showerror("Erro", "Por favor, selecione uma pasta válida.")
+        return
+        
+    processar_arquivos(diretorio, tipo_fluxo)
+
+# Configuração da Janela Principal
+root = tk.Tk()
+root.title("Organizador de Documentos Fiscais")
+root.geometry("550x220")
+root.resizable(False, False)
+
+frame = ttk.Frame(root, padding="20")
+frame.pack(fill=tk.BOTH, expand=True)
+
+# 1. Campo de Seleção de Pasta
+ttk.Label(frame, text="Pasta dos Arquivos:").grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
+entrada_pasta = ttk.Entry(frame, width=50)
+entrada_pasta.grid(row=1, column=0, padx=(0, 10), pady=(0, 15), columnspan=2)
+ttk.Button(frame, text="Selecionar...", command=selecionar_pasta).grid(row=1, column=2, pady=(0, 15))
+
+# 2. Área de Marcação (Radiobuttons)
+ttk.Label(frame, text="Tipo de Fluxo:").grid(row=2, column=0, sticky=tk.W, pady=(0, 5))
+
+var_fluxo = tk.StringVar(value="Entrada")  # Define "Entrada" como padrão inicial
+
+rb_entrada = ttk.Radiobutton(frame, text="Entrada (Compras)", variable=var_fluxo, value="Entrada")
+rb_entrada.grid(row=3, column=0, sticky=tk.W, pady=(0, 5))
+
+rb_saida = ttk.Radiobutton(frame, text="Saída (Vendas)", variable=var_fluxo, value="Saída")
+rb_saida.grid(row=4, column=0, sticky=tk.W)
+
+# 3. Botão Executar
+btn_executar = ttk.Button(frame, text="Renomear Arquivos", command=iniciar_processamento)
+btn_executar.grid(row=4, column=2, sticky=tk.E)
+
+root.mainloop()
